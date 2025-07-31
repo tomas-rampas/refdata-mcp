@@ -8,9 +8,10 @@ This is an MCP-RAG Banking Reference Data System - a .NET-based Model Context Pr
 
 ## Code Guidelines
 
-- Always comment public classes including its purpose
-- Always comment public methods including its purpose, if method comes form interface put the comment there and only refer to it in the class
-- Run `dotnet build` in .\src directory after every completed task and fix all errors
+- Always provide comment for public classes including its purpose
+- Always provide comment public methods including its purpose, if method comes form interface put the comment there and only refer to it in the class
+- Always create unit tests for classes or set of classes which should be unit tested. Include positive and negative test scenarios automatically
+- Run `dotnet build` in .\src directory after every completed task and fix all errors and warnings
 
 ## Architecture
 
@@ -29,9 +30,10 @@ The system consists of:
 - ✅ **Phase 2: Core Domain Models** - All entities, interfaces, and enums implemented
 - ✅ **Phase 3: Infrastructure Implementation** - All infrastructure services, parsers, and clients implemented
 - ✅ **Phase 4: Application Services & API** - Application services, DTOs, API controllers, DI configuration, and settings completed
+- ✅ **Phase 5: Client Application** - Blazor WASM client with Chat and Ingestion pages, ApiClient service, and banking-themed UI
 
 ### Current Phase
-- 🚧 **Phase 5: Client Application** - Starting with Blazor WASM client implementation
+- 🔜 **Next Phase: Testing & Documentation** - Unit tests, integration tests, and documentation
 
 ### Key Implementation Notes
 - All services are registered in DI container with appropriate lifetimes
@@ -39,11 +41,14 @@ The system consists of:
 - Health check endpoints are available for monitoring
 - Background ingestion service is configured to run periodically
 - CORS is configured for local development
+- Blazor client includes chat interface and ingestion management
+- Banking-appropriate styling applied throughout the UI
 
 ## Recent Updates (2025-07-31)
-- Completed Phase 4: Application Services & API
-- Created all API controllers (Chat, Ingestion, Health)
-- Configured dependency injection for all services
-- Added comprehensive appsettings.json configuration
-- Enabled Swagger/OpenAPI documentation
-- Configured CORS for Blazor client integration
+- Completed Phase 5: Client Application
+- Created Chat.razor page with message history and typing indicators
+- Created Ingestion.razor page with status monitoring and job history
+- Implemented ApiClient service for API communication
+- Added navigation menu and banking-themed styling
+- Updated MainLayout with professional banking UI
+- All components build successfully without errors
