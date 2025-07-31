@@ -7,6 +7,7 @@ using McpServer.Infrastructure.LlmClients;
 using McpServer.Infrastructure.Parsers;
 using McpServer.Infrastructure.Services;
 using McpServer.Infrastructure.VectorStore;
+using Microsoft.Extensions.Options;
 using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -44,6 +45,19 @@ builder.Services.Configure<OllamaSettings>(builder.Configuration.GetSection("Oll
 builder.Services.Configure<JiraSettings>(builder.Configuration.GetSection("Jira"));
 builder.Services.Configure<ConfluenceSettings>(builder.Configuration.GetSection("Confluence"));
 builder.Services.Configure<IngestionSettings>(builder.Configuration.GetSection("Ingestion"));
+
+// Register MongoDB
+builder.Services.AddSingleton<MongoDB.Driver.IMongoClient>(sp =>
+{
+    var settings = sp.GetRequiredService<IOptions<MongoDbSettings>>().Value;
+    return new MongoDB.Driver.MongoClient(settings.ConnectionString);
+});
+builder.Services.AddSingleton<MongoDB.Driver.IMongoDatabase>(sp =>
+{
+    var client = sp.GetRequiredService<MongoDB.Driver.IMongoClient>();
+    var settings = sp.GetRequiredService<IOptions<MongoDbSettings>>().Value;
+    return client.GetDatabase(settings.DatabaseName);
+});
 
 // Register infrastructure services
 builder.Services.AddSingleton<IVectorStore, MongoVectorStore>();
@@ -123,3 +137,6 @@ logger.LogInformation("Swagger UI available at: {SwaggerUrl}",
     app.Environment.IsDevelopment() ? "https://localhost:5001" : "[Production URL]");
 
 app.Run();
+
+// Make the implicit Program class public for integration tests
+public partial class Program { }
