@@ -33,6 +33,7 @@ The system consists of:
 - ✅ **Phase 5: Client Application** - Blazor WASM client with Chat and Ingestion pages, ApiClient service, and banking-themed UI
 
 ### Current Phase
+- 🚧 **Phase 6: Docker & Deployment** - Dockerfiles and docker-compose configuration completed
 - 🔜 **Next Phase: Testing & Documentation** - Unit tests, integration tests, and documentation
 
 ### Key Implementation Notes
@@ -51,4 +52,9 @@ The system consists of:
 - Implemented ApiClient service for API communication
 - Added navigation menu and banking-themed styling
 - Updated MainLayout with professional banking UI
+- Completed Phase 6: Docker & Deployment
+- Created Dockerfiles for API and Client projects
+- Updated docker-compose.yml with .NET services
+- Added environment variable configuration
+- Created appsettings.Docker.json
 - All components build successfully without errors

@@ -9,9 +9,9 @@ services:
     ports:
       - "27017:27017"
     environment:
-      MONGO_INITDB_ROOT_USERNAME: admin
-      MONGO_INITDB_ROOT_PASSWORD: admin123
-      MONGO_INITDB_DATABASE: mcprag
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USERNAME:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-admin123}
+      MONGO_INITDB_DATABASE: ${MONGO_DATABASE:-mcprag}
     volumes:
       - mongodb-data:/data/db
       - ./mongo-init:/docker-entrypoint-initdb.d:ro
@@ -135,6 +135,75 @@ services:
     networks:
       - mcprag-network
 
+  # .NET API Service
+  api:
+    build:
+      context: ../src
+      dockerfile: McpServer.Api/Dockerfile
+    image: mcprag-api:latest
+    container_name: mcprag-api
+    restart: unless-stopped
+    depends_on:
+      - mongodb
+      - ollama
+    ports:
+      - "5000:80"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Docker
+      - ConnectionStrings__MongoDB=mongodb://admin:admin123@mongodb:27017/mcprag?authSource=admin
+      - OllamaSettings__BaseUrl=http://ollama:11434
+      - OllamaSettings__Model=llama3.2
+      - OllamaSettings__EmbeddingModel=nomic-embed-text
+      - JiraSettings__BaseUrl=http://jira:8080
+      - JiraSettings__Username=admin
+      - JiraSettings__ApiToken=admin123
+      - ConfluenceSettings__BaseUrl=http://confluence:8090
+      - ConfluenceSettings__Username=admin
+      - ConfluenceSettings__ApiToken=admin123
+      - IngestionSettings__LocalPath=/data/documents
+      - IngestionSettings__IntervalMinutes=60
+      - IngestionSettings__ChunkSize=1000
+      - IngestionSettings__ChunkOverlap=200
+    volumes:
+      - ./data:/data:ro
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    networks:
+      - mcprag-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Blazor Client
+  client:
+    build:
+      context: ../src
+      dockerfile: McpServer.Client/Dockerfile
+    image: mcprag-client:latest
+    container_name: mcprag-client
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "3000:80"
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    networks:
+      - mcprag-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
 volumes:
   mongodb-data:
   ollama-data:
@@ -142,6 +211,8 @@ volumes:
   jira-data:
   confluence-postgres-data:
   confluence-data:
+  api-data:
+  client-data:
 
 networks:
   mcprag-network:
