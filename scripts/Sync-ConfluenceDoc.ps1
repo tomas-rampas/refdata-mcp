@@ -764,6 +764,18 @@ function ConvertTo-ConfluenceStorage {
         # Look for & not followed by proper entity names or numeric entities
         $sanitizedHtml = $sanitizedHtml -replace '&(?![a-zA-Z][a-zA-Z0-9]*;|#[0-9]+;|#x[0-9a-fA-F]+;)', '&amp;'
         
+        # Fix self-closing tags that need to be properly formatted for XHTML
+        # Convert unclosed <br> tags to self-closing <br/> tags
+        $sanitizedHtml = $sanitizedHtml -replace '<br(?![/>])', '<br/'
+        $sanitizedHtml = $sanitizedHtml -replace '<br\s+(?![/>])', '<br/'
+        $sanitizedHtml = $sanitizedHtml -replace '<br>', '<br/>'
+        
+        # Fix other common self-closing tags
+        $sanitizedHtml = $sanitizedHtml -replace '<hr(?![/>])', '<hr/'
+        $sanitizedHtml = $sanitizedHtml -replace '<hr>', '<hr/>'
+        $sanitizedHtml = $sanitizedHtml -replace '<img([^>]*?)(?<!/)\s*>', '<img$1/>'
+        $sanitizedHtml = $sanitizedHtml -replace '<input([^>]*?)(?<!/)\s*>', '<input$1/>'
+        
         Write-Verbose "HTML sanitization completed successfully"
         return $sanitizedHtml
         
