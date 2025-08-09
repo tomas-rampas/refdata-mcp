@@ -368,3 +368,5 @@ data/
 # Application specific
 appsettings.Local.json
 appsettings.Production.json
+
+CLAUDE.*

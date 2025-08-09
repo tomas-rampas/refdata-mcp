@@ -1,0 +1,92 @@
+version: '3.8'
+services:
+  # --- Database for Jira and Confluence ---
+  postgres:
+    image: postgres:14-alpine
+    container_name: postgres_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_PASSWORD=mysecretpassword
+      - POSTGRES_USER=myuser
+      - POSTGRES_DB=jiradb,confluencedb
+    ports:
+      - '5432:5432'
+    restart: unless-stopped
+
+  # --- Atlassian Jira Instance ---
+  jira:
+    image: atlassian/jira-software
+    container_name: jira_instance
+    volumes:
+      - jira_data:/var/atlassian/application-data/jira
+    ports:
+      - '8080:8080' # Access Jira at http://localhost:8080
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
+  # --- Atlassian Confluence Instance ---
+  confluence:
+    image: atlassian/confluence-server
+    container_name: confluence_instance
+    volumes:
+      - confluence_data:/var/atlassian/application-data/confluence
+    ports:
+      - '8090:8090' # Access Confluence at http://localhost:8090
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
+  # --- NEW: Elasticsearch for Vector Search ---
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.14.1
+    container_name: elasticsearch_node
+    environment:
+      - discovery.type=single-node # Critical for running a single-node cluster
+      - xpack.security.enabled=false # Disables security for easy local dev. DO NOT use in production!
+      - ES_JAVA_OPTS=-Xms1g -Xmx1g # Sets memory limits. Adjust based on your machine's RAM.
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    ports:
+      - '9200:9200' # REST API port
+      - '9300:9300'
+    restart: unless-stopped
+
+  # --- NEW: MongoDB for Chat History / Metadata ---
+  mongodb:
+    image: mongo:7.0
+    container_name: mongo_db
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=myuser
+      - MONGO_INITDB_ROOT_PASSWORD=mysecretpassword
+    volumes:
+      - mongo_data:/data/db
+    ports:
+      - '27017:27017' # Default MongoDB port
+    restart: unless-stopped
+
+  # --- Ollama Local LLM Service ---
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama_llm
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - '11434:11434' # Ollama API port
+    environment:
+      - OLLAMA_KEEP_ALIVE=24h # Keep models loaded for 24 hours
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 6G # Adjust based on available RAM
+
+# --- Docker volumes to persist data across container restarts ---
+volumes:
+  postgres_data:
+  jira_data:
+  confluence_data:
+  es_data:
+  mongo_data:
+  ollama_data:
