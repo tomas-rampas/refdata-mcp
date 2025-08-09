@@ -370,3 +370,4 @@ appsettings.Local.json
 appsettings.Production.json
 
 CLAUDE.*
+confluence/

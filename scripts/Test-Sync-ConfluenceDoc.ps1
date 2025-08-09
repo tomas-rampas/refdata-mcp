@@ -80,10 +80,7 @@ param(
     [System.Management.Automation.PSCredential]$Credential,
 
     [Parameter(Mandatory = $false, HelpMessage = "Delay in milliseconds between requests.")]
-    [int]$RequestDelay = 1500,
-
-    [Parameter(Mandatory = $false, HelpMessage = "Parent page ID for organizing imported content.")]
-    [string]$ParentPageId
+    [int]$RequestDelay = 1500
 )
 
 # --- SCRIPT SETUP AND DEPENDENCY HANDLING ---
@@ -265,54 +262,20 @@ function Get-DocumentationLinks {
             $tocHtmlDoc = New-Object HtmlAgilityPack.HtmlDocument
             $tocHtmlDoc.LoadHtml($tocResponse.Content)
             
-            # Get all links from the table of contents page - filter for leaf nodes only
+            # Get all links from the table of contents page
             $tocLinkNodes = $tocHtmlDoc.DocumentNode.SelectNodes("//article//a[@href]")
             if ($tocLinkNodes) {
-                Write-Verbose "Found $($tocLinkNodes.Count) total links in table of contents"
-                
-                # Filter to only leaf links (links that don't have child links)
-                $leafLinks = @()
+                Write-Verbose "Found $($tocLinkNodes.Count) links in table of contents"
                 foreach ($node in $tocLinkNodes) {
                     $href = $node.GetAttributeValue('href', '')
                     if ($href -and $href -ne '#' -and -not $href.StartsWith('javascript:')) {
-                        # Check if this link has child links in the TOC structure
-                        $parentLi = $node.ParentNode
-                        while ($parentLi -and $parentLi.Name -ne 'li') {
-                            $parentLi = $parentLi.ParentNode
-                        }
-                        
-                        $hasChildLinks = $false
-                        if ($parentLi) {
-                            # Check if this li has nested ul/ol with more links
-                            $childLists = $parentLi.SelectNodes(".//ul//a[@href] | .//ol//a[@href]")
-                            if ($childLists -and $childLists.Count -gt 0) {
-                                # Check if any child link is different from current link
-                                foreach ($childLink in $childLists) {
-                                    $childHref = $childLink.GetAttributeValue('href', '')
-                                    if ($childHref -and $childHref -ne $href) {
-                                        $hasChildLinks = $true
-                                        break
-                                    }
-                                }
-                            }
-                        }
-                        
-                        # Only add if it's a leaf node (no child links)
-                        if (-not $hasChildLinks) {
-                            # Filter out non-HTML files and resolve relative URLs
-                            if ($href.EndsWith('.html') -or $href.EndsWith('.htm') -or -not $href.Contains('.')) {
-                                $absoluteUri = New-Object System.Uri($baseUri, $href)
-                                $leafLinks += $absoluteUri.AbsoluteUri
-                            }
+                        # Filter out non-HTML files and resolve relative URLs
+                        if ($href.EndsWith('.html') -or $href.EndsWith('.htm') -or -not $href.Contains('.')) {
+                            $absoluteUri = New-Object System.Uri($baseUri, $href)
+                            $uniqueUrls.Add($absoluteUri.AbsoluteUri) | Out-Null
                         }
                     }
                 }
-                
-                # Add unique leaf links
-                foreach ($leafLink in $leafLinks) {
-                    $uniqueUrls.Add($leafLink) | Out-Null
-                }
-                Write-Verbose "Filtered to $($leafLinks.Count) leaf links"
             }
         }
         catch {
@@ -373,21 +336,28 @@ function Get-PageContent {
         return $null
     }
     
-    # Extract only the article element content - Oracle docs structure
-    $articleNode = $htmlDoc.DocumentNode.SelectSingleNode("//article[@role='none']")
-    
-    if (-not $articleNode) {
-        # Fallback to any article tag
-        $articleNode = $htmlDoc.DocumentNode.SelectSingleNode("//article")
+    # Try multiple selectors to find the main content
+    $contentNode = $htmlDoc.GetElementbyId("main-content")
+    if (-not $contentNode) {
+        # Try article element (Oracle docs use this)
+        $contentNode = $htmlDoc.DocumentNode.SelectSingleNode("//article")
+    }
+    if (-not $contentNode) {
+        # Try other common content containers
+        $contentNode = $htmlDoc.DocumentNode.SelectSingleNode("//div[@class='content']") 
+    }
+    if (-not $contentNode) {
+        # Last resort - try body content
+        $contentNode = $htmlDoc.DocumentNode.SelectSingleNode("//body")
     }
     
-    if (-not $articleNode) {
-        Write-Warning "Could not find article element on page $PageUrl"
+    if (-not $contentNode) {
+        Write-Warning "Could not find any content container on page $PageUrl"
         return $null
     }
 
-    # Fix relative links and image sources within the article
-    $articleNode.SelectNodes(".//a[@href] | .//img[@src]") | ForEach-Object {
+    # Fix relative links and image sources
+    $contentNode.SelectNodes("//a[@href] | //img[@src]") | ForEach-Object {
         if ($_.Name -eq 'a') {
             $attrName = 'href'
         } else {
@@ -400,8 +370,11 @@ function Get-PageContent {
         }
     }
 
-    # Extract title from article h1 or page title
-    $titleNode = $articleNode.SelectSingleNode(".//h1")
+    # Extract title with null checking
+    $titleNode = $contentNode.SelectSingleNode(".//h1")
+    if (-not $titleNode) {
+        $titleNode = $contentNode.SelectSingleNode(".//title")
+    }
     if (-not $titleNode) {
         $titleNode = $htmlDoc.DocumentNode.SelectSingleNode("//title")
     }
@@ -419,13 +392,7 @@ function Get-PageContent {
         }
     }
     
-    # Store only the HTML content from the div inside the article tag
-    $contentDiv = $articleNode.SelectSingleNode(".//div")
-    $htmlContent = if ($contentDiv) { 
-        $contentDiv.InnerHtml 
-    } else { 
-        $articleNode.InnerHtml 
-    }
+    $htmlContent = $contentNode.InnerHtml
 
     return [PSCustomObject]@{
         Title = $title
@@ -435,42 +402,7 @@ function Get-PageContent {
 
 # --- CONFLUENCE AND FILE FUNCTIONS ---
 
-# Function to create the JSON content (Confluence API compatible format)
-function New-ContentPayload {
-    param([string]$Title, [string]$HtmlContent, [string]$SpaceKey, [string]$ParentPageId)
-    
-    $payload = [PSCustomObject]@{
-        type = 'page'
-        title = $Title
-        space = @{
-            key = $SpaceKey
-        }
-        body = @{
-            storage = @{
-                value = $HtmlContent
-                representation = 'storage'
-            }
-        }
-        version = @{
-            number = 1
-            minorEdit = $false
-        }
-        status = 'current'
-    }
-    
-    # Add parent page (ancestors) if specified
-    if ($ParentPageId) {
-        $payload | Add-Member -MemberType NoteProperty -Name 'ancestors' -Value @(
-            @{
-                id = $ParentPageId
-            }
-        )
-    }
-    
-    return ConvertTo-Json -InputObject $payload -Depth 5
-}
-
-# Function to create the JSON payload for the Confluence API (kept for backward compatibility)
+# Function to create the JSON payload for the Confluence API
 function New-ConfluencePayload {
     param([string]$Title, [string]$HtmlContent, [string]$SpaceKey)
     $payload = [PSCustomObject]@{
@@ -510,7 +442,7 @@ function Save-PayloadToFile {
         $sanitizedTitle = $sanitizedTitle.Substring(0, 200)
     }
     
-    $fileName = $sanitizedTitle + ".json"
+    $fileName = $sanitizedTitle + "confluence"
     $filePath = Join-Path -Path $Directory -ChildPath $fileName
 
     Write-Verbose "Saving payload to $filePath"
@@ -615,9 +547,7 @@ foreach ($link in $allLinks) {
     $pageData = Get-PageContent -PageUrl $link
     if ($pageData) {
         if ($Mode -eq 'Save') {
-            # Use ConfluenceSpaceKey if provided, otherwise use default "ORACLE_DOCS"
-            $spaceKey = if ($ConfluenceSpaceKey) { $ConfluenceSpaceKey } else { "ORACLE_DOCS" }
-            $jsonPayload = New-ContentPayload -Title $pageData.Title -HtmlContent $pageData.HtmlContent -SpaceKey $spaceKey -ParentPageId $ParentPageId
+            $jsonPayload = New-ConfluencePayload -Title $pageData.Title -HtmlContent $pageData.HtmlContent -SpaceKey "DUMMY_KEY"
             Save-PayloadToFile -Payload $jsonPayload -Title $pageData.Title -Directory $OutputDirectory
         }
         elseif ($Mode -eq 'Apply') {

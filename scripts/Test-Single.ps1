@@ -80,10 +80,7 @@ param(
     [System.Management.Automation.PSCredential]$Credential,
 
     [Parameter(Mandatory = $false, HelpMessage = "Delay in milliseconds between requests.")]
-    [int]$RequestDelay = 1500,
-
-    [Parameter(Mandatory = $false, HelpMessage = "Parent page ID for organizing imported content.")]
-    [string]$ParentPageId
+    [int]$RequestDelay = 1500
 )
 
 # --- SCRIPT SETUP AND DEPENDENCY HANDLING ---
@@ -435,38 +432,13 @@ function Get-PageContent {
 
 # --- CONFLUENCE AND FILE FUNCTIONS ---
 
-# Function to create the JSON content (Confluence API compatible format)
+# Function to create the JSON content (simplified - just store HTML and title)
 function New-ContentPayload {
-    param([string]$Title, [string]$HtmlContent, [string]$SpaceKey, [string]$ParentPageId)
-    
+    param([string]$Title, [string]$HtmlContent, [string]$SpaceKey)
     $payload = [PSCustomObject]@{
-        type = 'page'
         title = $Title
-        space = @{
-            key = $SpaceKey
-        }
-        body = @{
-            storage = @{
-                value = $HtmlContent
-                representation = 'storage'
-            }
-        }
-        version = @{
-            number = 1
-            minorEdit = $false
-        }
-        status = 'current'
+        content = $HtmlContent
     }
-    
-    # Add parent page (ancestors) if specified
-    if ($ParentPageId) {
-        $payload | Add-Member -MemberType NoteProperty -Name 'ancestors' -Value @(
-            @{
-                id = $ParentPageId
-            }
-        )
-    }
-    
     return ConvertTo-Json -InputObject $payload -Depth 5
 }
 
@@ -615,9 +587,7 @@ foreach ($link in $allLinks) {
     $pageData = Get-PageContent -PageUrl $link
     if ($pageData) {
         if ($Mode -eq 'Save') {
-            # Use ConfluenceSpaceKey if provided, otherwise use default "ORACLE_DOCS"
-            $spaceKey = if ($ConfluenceSpaceKey) { $ConfluenceSpaceKey } else { "ORACLE_DOCS" }
-            $jsonPayload = New-ContentPayload -Title $pageData.Title -HtmlContent $pageData.HtmlContent -SpaceKey $spaceKey -ParentPageId $ParentPageId
+            $jsonPayload = New-ContentPayload -Title $pageData.Title -HtmlContent $pageData.HtmlContent -SpaceKey "DUMMY_KEY"
             Save-PayloadToFile -Payload $jsonPayload -Title $pageData.Title -Directory $OutputDirectory
         }
         elseif ($Mode -eq 'Apply') {
