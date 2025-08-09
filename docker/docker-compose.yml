@@ -6,13 +6,16 @@ services:
     container_name: postgres_db
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
     environment:
       - POSTGRES_PASSWORD=mysecretpassword
       - POSTGRES_USER=myuser
-      - POSTGRES_DB=jiradb,confluencedb
+      - POSTGRES_DB=postgres
     ports:
       - '5432:5432'
     restart: unless-stopped
+    networks:
+      - refdata_network
 
   # --- Atlassian Jira Instance ---
   jira:
@@ -22,9 +25,22 @@ services:
       - jira_data:/var/atlassian/application-data/jira
     ports:
       - '8080:8080' # Access Jira at http://localhost:8080
+    environment:
+      - ATL_PROXY_NAME=localhost
+      - ATL_PROXY_PORT=8080
+      - ATL_TOMCAT_SCHEME=http
+      - ATL_DB_TYPE=postgresql
+      - ATL_DB_DRIVER=org.postgresql.Driver
+      - ATL_JDBC_URL=jdbc:postgresql://postgres_db:5432/jiradb
+      - ATL_JDBC_USER=myuser
+      - ATL_JDBC_PASSWORD=mysecretpassword
+      - JVM_MINIMUM_MEMORY=1536m
+      - JVM_MAXIMUM_MEMORY=2048m
     depends_on:
       - postgres
     restart: unless-stopped
+    networks:
+      - refdata_network
 
   # --- Atlassian Confluence Instance ---
   confluence:
@@ -34,9 +50,22 @@ services:
       - confluence_data:/var/atlassian/application-data/confluence
     ports:
       - '8090:8090' # Access Confluence at http://localhost:8090
+    environment:
+      - ATL_PROXY_NAME=localhost
+      - ATL_PROXY_PORT=8090
+      - ATL_TOMCAT_SCHEME=http
+      - ATL_DB_TYPE=postgresql
+      - ATL_DB_DRIVER=org.postgresql.Driver
+      - ATL_JDBC_URL=jdbc:postgresql://postgres_db:5432/confluencedb
+      - ATL_JDBC_USER=myuser
+      - ATL_JDBC_PASSWORD=mysecretpassword
+      - JVM_MINIMUM_MEMORY=1536m
+      - JVM_MAXIMUM_MEMORY=2048m
     depends_on:
       - postgres
     restart: unless-stopped
+    networks:
+      - refdata_network
 
   # --- NEW: Elasticsearch for Vector Search ---
   elasticsearch:
@@ -52,6 +81,8 @@ services:
       - '9200:9200' # REST API port
       - '9300:9300'
     restart: unless-stopped
+    networks:
+      - refdata_network
 
   # --- NEW: MongoDB for Chat History / Metadata ---
   mongodb:
@@ -65,6 +96,8 @@ services:
     ports:
       - '27017:27017' # Default MongoDB port
     restart: unless-stopped
+    networks:
+      - refdata_network
 
   # --- Ollama Local LLM Service ---
   ollama:
@@ -81,6 +114,8 @@ services:
       resources:
         limits:
           memory: 6G # Adjust based on available RAM
+    networks:
+      - refdata_network
 
 # --- Docker volumes to persist data across container restarts ---
 volumes:
@@ -90,3 +125,8 @@ volumes:
   es_data:
   mongo_data:
   ollama_data:
+
+# --- Docker network for inter-service communication ---
+networks:
+  refdata_network:
+    driver: bridge

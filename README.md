@@ -71,11 +71,34 @@ Once all services are running, verify they are accessible:
 
 ### Default Credentials
 
-| Service | Username | Password |
-|---------|----------|----------|
-| PostgreSQL | myuser | mysecretpassword |
-| MongoDB | myuser | mysecretpassword |
-| Elasticsearch | N/A | No authentication (dev only) |
+| Service | Username | Password | Database |
+|---------|----------|----------|----------|
+| PostgreSQL | myuser | mysecretpassword | postgres, jiradb, confluencedb |
+| MongoDB | myuser | mysecretpassword | - |
+| Elasticsearch | N/A | No authentication (dev only) | - |
+
+### Connecting to Services
+
+#### PostgreSQL Connection
+```bash
+# Connect via Docker (recommended)
+docker exec -it postgres_db psql -U myuser -d postgres
+
+# Connect from host (requires psql client)
+psql -h localhost -p 5432 -U myuser -d postgres
+
+# List all databases
+docker exec postgres_db psql -U myuser -d postgres -c "\l"
+```
+
+#### MongoDB Connection
+```bash
+# Connect via Docker
+docker exec -it mongo_db mongosh --username myuser --password mysecretpassword
+
+# Connect from host (requires mongosh client)
+mongosh "mongodb://myuser:mysecretpassword@localhost:27017"
+```
 
 ### Resource Allocation
 
@@ -149,6 +172,9 @@ curl http://localhost:9200/_cluster/health
 
 # Test MongoDB connection
 docker exec mongo_db mongosh --username myuser --password mysecretpassword --eval "db.adminCommand('ismaster')"
+
+# Test PostgreSQL connection
+docker exec postgres_db psql -U myuser -d postgres -c "\l"
 ```
 
 ### Test Model Inference
@@ -197,20 +223,22 @@ docker compose -f docker/docker-compose.yml logs -f ollama
 ### Jira Setup (First Time)
 1. Navigate to http://localhost:8080
 2. Follow the setup wizard
-3. Configure PostgreSQL connection:
-   - **Host**: postgres_db
-   - **Database**: jiradb
-   - **Username**: myuser
-   - **Password**: mysecretpassword
+3. **Database configuration is pre-configured via environment variables**:
+   - Connection URL: `jdbc:postgresql://postgres_db:5432/jiradb`
+   - Username: `myuser`
+   - Password: `mysecretpassword`
+4. If asked for database configuration, use the values above
+5. Complete the license and administrator account setup
 
 ### Confluence Setup (First Time)
 1. Navigate to http://localhost:8090
 2. Follow the setup wizard
-3. Configure PostgreSQL connection:
-   - **Host**: postgres_db
-   - **Database**: confluencedb
-   - **Username**: myuser
-   - **Password**: mysecretpassword
+3. **Database configuration is pre-configured via environment variables**:
+   - Connection URL: `jdbc:postgresql://postgres_db:5432/confluencedb`
+   - Username: `myuser`
+   - Password: `mysecretpassword`
+4. If asked for database configuration, use the values above
+5. Complete the license and administrator account setup
 
 ## Troubleshooting
 
@@ -242,6 +270,52 @@ netstat -tulpn | grep -E ':(5432|27017|9200|11434|8080|8090)'
 docker compose -f docker/docker-compose.yml restart <service-name>
 ```
 
+#### PostgreSQL Connection Issues
+```bash
+# Connect to PostgreSQL (correct way)
+docker exec -it postgres_db psql -U myuser -d postgres
+
+# If you get "No such file or directory" error when using psql directly:
+# This means you're trying to connect via Unix socket instead of TCP
+# Use the Docker exec method above, or install PostgreSQL client:
+sudo apt-get install postgresql-client-common postgresql-client
+
+# Then connect via TCP:
+psql -h localhost -p 5432 -U myuser -d postgres
+
+# Check PostgreSQL logs
+docker logs postgres_db
+
+# Verify databases were created
+docker exec postgres_db psql -U myuser -d postgres -c "SELECT datname FROM pg_database;"
+```
+
+#### Jira/Confluence Database Connection Issues
+If Jira or Confluence shows "Connection refused" errors:
+
+```bash
+# 1. Ensure PostgreSQL is running and healthy
+docker logs postgres_db
+
+# 2. Check if containers are on the same network
+docker network ls
+docker network inspect refdata-mcp_refdata_network
+
+# 3. Test connectivity between containers
+docker exec jira_instance ping postgres_db
+docker exec confluence_instance ping postgres_db
+
+# 4. Restart services in correct order
+docker compose -f docker/docker-compose.yml stop
+docker compose -f docker/docker-compose.yml up -d postgres
+# Wait for PostgreSQL to be ready, then:
+docker compose -f docker/docker-compose.yml up -d jira confluence
+
+# 5. If still failing, recreate containers
+docker compose -f docker/docker-compose.yml down
+docker compose -f docker/docker-compose.yml up -d
+```
+
 ### Logs and Debugging
 ```bash
 # Check system resources
@@ -267,6 +341,50 @@ For development of the .NET application:
 
 See `CLAUDE.md` for detailed development guidance.
 
+## Scripts
+
+### Sync-ConfluenceDoc.ps1
+
+A cross-platform PowerShell script for scraping Oracle documentation and creating Confluence pages.
+
+#### Prerequisites
+- PowerShell 7+ (recommended for full cross-platform support)
+- .NET SDK (for package management on Linux/macOS)
+
+#### Usage
+
+**Windows:**
+```powershell
+# Test cross-platform compatibility
+.\scripts\Test-CrossPlatform.ps1 -Verbose
+
+# Scrape and save JSON files
+.\scripts\Sync-ConfluenceDoc.ps1 -Mode Save -Verbose
+
+# Apply directly to Confluence
+$cred = Get-Credential
+.\scripts\Sync-ConfluenceDoc.ps1 -Mode Apply -ConfluenceBaseUrl "http://localhost:8090" -ConfluenceSpaceKey "DOCS" -Credential $cred -Verbose
+```
+
+**Linux/macOS:**
+```bash
+# Test cross-platform compatibility
+pwsh scripts/Test-CrossPlatform.ps1 -Verbose
+
+# Scrape and save JSON files
+pwsh scripts/Sync-ConfluenceDoc.ps1 -Mode Save -Verbose
+
+# Apply directly to Confluence
+pwsh scripts/Sync-ConfluenceDoc.ps1 -Mode Apply -ConfluenceBaseUrl "http://localhost:8090" -ConfluenceSpaceKey "DOCS" -Credential (Get-Credential) -Verbose
+```
+
+#### Features
+- Cross-platform compatibility (Windows, Linux, macOS)
+- Automatic dependency management (HtmlAgilityPack)
+- Confluence REST API integration
+- Graceful rate limiting
+- Robust error handling
+
 ## Support
 
 For issues and questions:
@@ -274,3 +392,4 @@ For issues and questions:
 - Ensure all prerequisites are met
 - Verify port availability
 - Check Docker resource allocation
+- Run `Test-CrossPlatform.ps1` for PowerShell script issues
