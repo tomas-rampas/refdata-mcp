@@ -302,9 +302,9 @@ function Test-ConfluenceSpace {
     
     try {
         Write-Verbose "Validating access to Confluence space '$SpaceKey'..."
-        $response = Invoke-RestMethod -Uri $spaceUrl -Method Get -Headers $Headers -ErrorAction Stop
-        Write-Host "✓ Successfully connected to Confluence space: $($response.name)" -ForegroundColor Green
-        return $response
+        $spaceDetails = Invoke-RestMethod -Uri $spaceUrl -Method Get -Headers $Headers -ErrorAction Stop
+        Write-Host "✓ Successfully connected to Confluence space: $($spaceDetails.name)" -ForegroundColor Green
+        return $spaceDetails
     }
     catch {
         $statusCode = if ($_.Exception.Response) { $_.Exception.Response.StatusCode.value__ } else { "Unknown" }
@@ -333,7 +333,7 @@ Write-Host "Validating service connectivity..." -ForegroundColor Cyan
 
 # Test Confluence connectivity
 $confluenceHeaders = New-ConfluenceHeaders -PersonalAccessToken $PersonalAccessToken
-$spaceInfo = Test-ConfluenceSpace -BaseUrl $ConfluenceBaseUrl -SpaceKey $SpaceKey -Headers $confluenceHeaders
+Test-ConfluenceSpace -BaseUrl $ConfluenceBaseUrl -SpaceKey $SpaceKey -Headers $confluenceHeaders
 
 # Test Elasticsearch connectivity
 try {
@@ -791,7 +791,7 @@ function Initialize-ElasticsearchIndex {
     # Check if index exists
     $indexExists = $false
     try {
-        $response = Invoke-RestMethod -Uri "$ElasticsearchUrl/$IndexName" -Method Head -ErrorAction SilentlyContinue
+        Invoke-RestMethod -Uri "$ElasticsearchUrl/$IndexName" -Method Head -ErrorAction SilentlyContinue | Out-Null
         $indexExists = $true
         Write-Verbose "Index '$IndexName' already exists"
     }
@@ -957,9 +957,9 @@ function Add-DocumentsToElasticsearch {
             
             # Check for errors in the response
             if ($response.errors) {
-                $errors = $response.items | Where-Object { $_.index.error }
-                foreach ($error in $errors) {
-                    Write-Warning "Indexing error for document $($error.index._id): $($error.index.error.reason)"
+                $failedItems = $response.items | Where-Object { $_.index.error }
+                foreach ($failedItem in $failedItems) {
+                    Write-Warning "Indexing error for document $($failedItem.index._id): $($failedItem.index.error.reason)"
                     $errorCount++
                 }
             }

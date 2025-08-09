@@ -430,6 +430,139 @@ pwsh scripts/Sync-ConfluenceDoc.ps1 -Mode Apply -ConfluenceBaseUrl "http://local
 - Graceful rate limiting
 - Robust error handling
 
+### Populate-ElasticsearchVectors.ps1 ⚡
+
+A comprehensive PowerShell script that creates a vector database from Confluence content for Retrieval-Augmented Generation (RAG) operations. This script reads pages directly from Confluence via API, processes them using semantic structure-aware chunking, generates embeddings with Ollama, and indexes them in Elasticsearch.
+
+#### Prerequisites
+- PowerShell 7+ (cross-platform support)
+- All Docker services running (Confluence, Elasticsearch, Ollama)
+- Confluence space with content (use Sync-ConfluenceDoc.ps1 first)
+- Personal Access Token for Confluence API
+
+#### Key Features
+- 🧠 **Semantic Chunking**: Structure-aware processing that preserves document integrity
+  - Uses HTML headers (H1-H6) as natural section boundaries
+  - Keeps complete procedures, tables, and figures intact
+  - No arbitrary token limits - prioritizes content completeness
+- ⚡ **Parallel Processing**: Batch embedding generation with configurable concurrency
+- 🔍 **Vector Search Ready**: Creates 384-dimensional embeddings using all-minilm model
+- 📊 **Comprehensive Monitoring**: Progress tracking, statistics, and detailed logging
+- 🛡️ **Robust Error Handling**: Graceful failure recovery and service validation
+
+#### Usage
+
+**Basic Usage:**
+```bash
+# Dry run to test configuration (recommended first)
+pwsh scripts/Populate-ElasticsearchVectors.ps1 -SpaceKey "REF" -PersonalAccessToken "YOUR_TOKEN" -DryRun -Verbose
+
+# Full processing with default settings
+pwsh scripts/Populate-ElasticsearchVectors.ps1 -SpaceKey "REF" -PersonalAccessToken "YOUR_TOKEN" -Verbose
+
+# Custom configuration
+pwsh scripts/Populate-ElasticsearchVectors.ps1 \
+  -SpaceKey "ORACLE_DOCS" \
+  -PersonalAccessToken "YOUR_TOKEN" \
+  -IndexName "banking-knowledge-base" \
+  -BatchSize 5 \
+  -RequestDelay 2000 \
+  -Verbose
+```
+
+**Advanced Options:**
+```bash
+# Force recreation of Elasticsearch index
+pwsh scripts/Populate-ElasticsearchVectors.ps1 -SpaceKey "REF" -PersonalAccessToken "YOUR_TOKEN" -Force -Verbose
+
+# Custom service endpoints
+pwsh scripts/Populate-ElasticsearchVectors.ps1 \
+  -SpaceKey "REF" \
+  -PersonalAccessToken "YOUR_TOKEN" \
+  -ConfluenceBaseUrl "http://localhost:8090" \
+  -ElasticsearchUrl "http://localhost:9200" \
+  -OllamaUrl "http://localhost:11434" \
+  -Verbose
+```
+
+#### Parameters
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `SpaceKey` | Confluence space to process (required) | - |
+| `PersonalAccessToken` | Confluence API token (required) | - |
+| `ConfluenceBaseUrl` | Confluence instance URL | http://localhost:8090 |
+| `ElasticsearchUrl` | Elasticsearch instance URL | http://localhost:9200 |
+| `OllamaUrl` | Ollama service URL | http://localhost:11434 |
+| `IndexName` | Elasticsearch index name | confluence-vectors |
+| `EmbeddingModel` | Ollama embedding model | all-minilm |
+| `MaxChunkTokens` | Maximum tokens per chunk (fallback only) | 2000 |
+| `BatchSize` | Parallel processing batch size | 10 |
+| `RequestDelay` | Delay between API requests (ms) | 1000 |
+| `DryRun` | Test run without indexing | false |
+| `Force` | Recreate index if exists | false |
+
+#### Processing Pipeline
+
+1. **Service Validation**: Tests connectivity to Confluence, Elasticsearch, and Ollama
+2. **Page Retrieval**: Fetches all pages from specified Confluence space with pagination
+3. **Semantic Chunking**: Analyzes HTML structure and creates logical content chunks
+4. **Vectorization**: Generates embeddings using Ollama's all-minilm model
+5. **Elasticsearch Indexing**: Bulk indexes documents with metadata for search
+6. **Statistics & Reporting**: Provides comprehensive processing metrics
+
+#### Output Example
+```
+📊 PROCESSING STATISTICS
+========================
+Confluence Space: REF
+Total Pages Found: 45
+Pages Processed: 43
+Pages Skipped: 2
+Total Chunks Created: 127
+Chunks with Embeddings: 125
+Average Chunks per Page: 2.95
+Average Tokens per Chunk: 456
+Total Estimated Tokens: 57,912
+Elasticsearch Index: confluence-vectors
+Processing Time: 0:12:34
+
+✅ PROCESSING COMPLETED SUCCESSFULLY
+Vector database is ready for semantic search and RAG operations!
+
+💡 Example Elasticsearch Queries:
+Search by content: GET http://localhost:9200/confluence-vectors/_search?q=content:"network code"
+Get all chunks from a page: GET http://localhost:9200/confluence-vectors/_search?q=page_title:"Purpose"
+Vector similarity search: POST http://localhost:9200/confluence-vectors/_search (with kNN query)
+```
+
+#### Integration with RAG System
+
+The created vector database integrates seamlessly with the MCP-RAG Reference Data System:
+- **Elasticsearch Schema**: Optimized for vector similarity search with cosine similarity
+- **Metadata Fields**: Includes page IDs, section titles, chunk types for filtering
+- **Document Structure**: Preserves hierarchical relationships for context
+- **Search Ready**: Supports both keyword and semantic vector queries
+
+#### Troubleshooting
+
+**Common Issues:**
+- **No Confluence content**: Run `Sync-ConfluenceDoc.ps1` first to populate Confluence
+- **Missing Ollama models**: Run `docker exec ollama_llm ollama pull all-minilm`
+- **Memory issues**: Reduce `BatchSize` parameter for lower memory usage
+- **API rate limits**: Increase `RequestDelay` for more conservative API usage
+
+**Service Dependencies:**
+```bash
+# Ensure all required services are running
+docker compose -f docker/docker-compose.yml ps
+
+# Test individual services
+curl http://localhost:8090/rest/api/space
+curl http://localhost:9200/_cluster/health
+curl http://localhost:11434/api/tags
+```
+
 ## Support
 
 For issues and questions:
