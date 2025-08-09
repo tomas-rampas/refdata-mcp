@@ -223,22 +223,55 @@ docker compose -f docker/docker-compose.yml logs -f ollama
 ### Jira Setup (First Time)
 1. Navigate to http://localhost:8080
 2. Follow the setup wizard
-3. **Database configuration is pre-configured via environment variables**:
-   - Connection URL: `jdbc:postgresql://postgres_db:5432/jiradb`
-   - Username: `myuser`
-   - Password: `mysecretpassword`
-4. If asked for database configuration, use the values above
-5. Complete the license and administrator account setup
+3. **When prompted for database configuration, use these settings**:
+   
+   **IMPORTANT**: Use `postgres_db` as hostname (NOT localhost)
+   
+   | Setting | Value |
+   |---------|-------|
+   | Database Type | PostgreSQL |
+   | Hostname | `postgres_db` |
+   | Port | `5432` |
+   | Database | `jiradb` |
+   | Username | `myuser` |
+   | Password | `mysecretpassword` |
+   | JDBC URL | `jdbc:postgresql://postgres_db:5432/jiradb` |
+
+4. Complete the license and administrator account setup
 
 ### Confluence Setup (First Time)
 1. Navigate to http://localhost:8090
 2. Follow the setup wizard
-3. **Database configuration is pre-configured via environment variables**:
-   - Connection URL: `jdbc:postgresql://postgres_db:5432/confluencedb`
-   - Username: `myuser`
-   - Password: `mysecretpassword`
-4. If asked for database configuration, use the values above
-5. Complete the license and administrator account setup
+3. **When prompted for database configuration, use these settings**:
+   
+   **IMPORTANT**: Use `postgres_db` as hostname (NOT localhost)
+   
+   | Setting | Value |
+   |---------|-------|
+   | Database Type | PostgreSQL |
+   | Hostname | `postgres_db` |
+   | Port | `5432` |
+   | Database | `confluencedb` |
+   | Username | `myuser` |
+   | Password | `mysecretpassword` |
+   | JDBC URL | `jdbc:postgresql://postgres_db:5432/confluencedb` |
+
+4. Complete the license and administrator account setup
+
+## **Container Networking**
+
+### **Important**: Container-to-Container Communication
+- **From your host machine**: Use `localhost:5432` to connect to PostgreSQL
+- **From containers (Jira/Confluence)**: Use `postgres_db:5432` to connect to PostgreSQL
+
+### **Container Service Names**
+All containers can reach each other using these hostnames:
+- `postgres_db` - PostgreSQL database
+- `mongo_db` - MongoDB  
+- `elasticsearch_node` - Elasticsearch
+- `ollama_llm` - Ollama LLM service
+- `jira_instance` - Jira
+- `confluence_instance` - Confluence
 
 ## Troubleshooting
 
@@ -297,24 +330,31 @@ If Jira or Confluence shows "Connection refused" errors:
 # 1. Ensure PostgreSQL is running and healthy
 docker logs postgres_db
 
-# 2. Check if containers are on the same network
+# 2. Verify databases were created correctly
+docker exec postgres_db psql -U myuser -d postgres -c "\l"
+
+# 3. Check if containers are on the same network
 docker network ls
 docker network inspect refdata-mcp_refdata_network
 
-# 3. Test connectivity between containers
+# 4. Test connectivity between containers
 docker exec jira_instance ping postgres_db
 docker exec confluence_instance ping postgres_db
 
-# 4. Restart services in correct order
-docker compose -f docker/docker-compose.yml stop
+# 5. If databases weren't created correctly, reset PostgreSQL:
+docker compose -f docker/docker-compose.yml stop postgres jira confluence
+docker compose -f docker/docker-compose.yml rm postgres
+docker volume ls | grep postgres  # Find the volume name
+docker volume rm docker_postgres_data  # Replace with actual volume name
 docker compose -f docker/docker-compose.yml up -d postgres
-# Wait for PostgreSQL to be ready, then:
+# Wait 10-15 seconds for PostgreSQL to initialize
 docker compose -f docker/docker-compose.yml up -d jira confluence
 
-# 5. If still failing, recreate containers
-docker compose -f docker/docker-compose.yml down
-docker compose -f docker/docker-compose.yml up -d
+# 6. Verify database creation
+docker exec postgres_db psql -U myuser -d postgres -c "SELECT datname FROM pg_database WHERE datname IN ('jiradb', 'confluencedb');"
 ```
+
+**Common Issue**: If you see a database named `"jiradb,confluencedb"` instead of two separate databases, this indicates the initialization script didn't run properly. Follow step 5 above to reset and recreate the PostgreSQL container.
 
 ### Logs and Debugging
 ```bash
