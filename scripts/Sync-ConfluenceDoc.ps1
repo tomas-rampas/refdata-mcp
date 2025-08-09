@@ -24,11 +24,18 @@
 .PARAMETER ConfluenceSpaceKey
     The key of the Confluence space where pages will be created (e.g., "FINDEV"). Required for 'Apply' mode.
 
-.PARAMETER Credential
-    A PSCredential object containing the username and password for the Confluence API. Required for 'Apply' mode.
+.PARAMETER PersonalAccessToken
+    A Personal Access Token for authenticating with the Confluence API. Required for 'Apply' mode.
 
 .PARAMETER RequestDelay
     The delay in milliseconds between each web request to the Oracle server to be graceful.
+
+.PARAMETER ParentPageId
+    The ID of a parent page under which all imported pages will be organized as child pages.
+
+.PARAMETER OverwriteExisting
+    If specified, existing pages with the same title will be deleted and recreated with new content. 
+    If not specified, existing pages will be skipped.
 
 .EXAMPLE
     # MODE 1: Scrape the docs and SAVE the JSON files locally (Windows)
@@ -40,13 +47,15 @@
 
 .EXAMPLE
     # MODE 2: Scrape the docs and APPLY them directly to a local Confluence instance (Windows)
-    $cred = Get-Credential
-    .\Sync-ConfluenceDoc.ps1 -Mode Apply -ConfluenceBaseUrl "http://localhost:8090" -ConfluenceSpaceKey "FINDEV" -Credential $cred -Verbose
+    .\Sync-ConfluenceDoc.ps1 -Mode Apply -ConfluenceBaseUrl "http://localhost:8090" -ConfluenceSpaceKey "FINDEV" -PersonalAccessToken "YOUR_TOKEN_HERE" -Verbose
 
 .EXAMPLE
     # MODE 2: Scrape the docs and APPLY them directly to a local Confluence instance (Linux/macOS)
-    $cred = Get-Credential
-    pwsh ./Sync-ConfluenceDoc.ps1 -Mode Apply -ConfluenceBaseUrl "http://localhost:8090" -ConfluenceSpaceKey "FINDEV" -Credential $cred -Verbose
+    pwsh ./Sync-ConfluenceDoc.ps1 -Mode Apply -ConfluenceBaseUrl "http://localhost:8090" -ConfluenceSpaceKey "FINDEV" -PersonalAccessToken "YOUR_TOKEN_HERE" -Verbose
+
+.EXAMPLE
+    # MODE 3: Overwrite existing pages with same title (replace existing content)
+    pwsh ./Sync-ConfluenceDoc.ps1 -Mode Apply -ConfluenceBaseUrl "http://localhost:8090" -ConfluenceSpaceKey "FINDEV" -PersonalAccessToken "YOUR_TOKEN_HERE" -OverwriteExisting -Verbose
 
 .NOTES
     Requires PowerShell 7+ for cross-platform compatibility.
@@ -71,19 +80,22 @@ param(
     [string]$OutputDirectory = "confluence",
 
     [Parameter(Mandatory = $false, HelpMessage = "Base URL of your Confluence instance.")]
-    [string]$ConfluenceBaseUrl,
+    [string]$ConfluenceBaseUrl = "http://localhost:8090",
 
     [Parameter(Mandatory = $false, HelpMessage = "Key of the target Confluence space.")]
-    [string]$ConfluenceSpaceKey,
+    [string]$ConfluenceSpaceKey = "REF",
 
-    [Parameter(Mandatory = $false, HelpMessage = "Credentials for the Confluence API.")]
-    [System.Management.Automation.PSCredential]$Credential,
+    [Parameter(Mandatory = $false, HelpMessage = "Personal Access Token for the Confluence API.")]
+    [string]$PersonalAccessToken,
 
     [Parameter(Mandatory = $false, HelpMessage = "Delay in milliseconds between requests.")]
-    [int]$RequestDelay = 1500,
+    [int]$RequestDelay = 1000,
 
     [Parameter(Mandatory = $false, HelpMessage = "Parent page ID for organizing imported content.")]
-    [string]$ParentPageId
+    [string]$ParentPageId,
+
+    [Parameter(Mandatory = $false, HelpMessage = "If true, deletes existing pages with the same title before creating new ones.")]
+    [switch]$OverwriteExisting
 )
 
 # --- SCRIPT SETUP AND DEPENDENCY HANDLING ---
@@ -421,11 +433,14 @@ function Get-PageContent {
     
     # Store only the HTML content from the div inside the article tag
     $contentDiv = $articleNode.SelectSingleNode(".//div")
-    $htmlContent = if ($contentDiv) { 
+    $rawHtmlContent = if ($contentDiv) { 
         $contentDiv.InnerHtml 
     } else { 
         $articleNode.InnerHtml 
     }
+    
+    # Sanitize HTML content for Confluence compatibility
+    $htmlContent = ConvertTo-ConfluenceStorage -HtmlContent $rawHtmlContent
 
     return [PSCustomObject]@{
         Title = $title
@@ -525,29 +540,240 @@ function Save-PayloadToFile {
     }
 }
 
-# Function to post the payload to the Confluence API
-function Invoke-ConfluenceApi {
-    param([string]$Payload, [string]$BaseUrl, [System.Management.Automation.PSCredential]$Cred)
-    $apiUrl = "$BaseUrl/rest/api/content"
-    $username = $Cred.UserName
-    $password = $Cred.GetNetworkCredential().Password
-    $base64AuthInfo = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes(("{0}:{1}" -f $username, $password)))
+# Function to find existing page by title in Confluence
+function Get-ConfluencePageByTitle {
+    param([string]$Title, [string]$BaseUrl, [string]$SpaceKey, [string]$PersonalAccessToken)
+    
+    $encodedTitle = [System.Web.HttpUtility]::UrlEncode($Title)
+    $searchUrl = "$BaseUrl/rest/api/content?title=$encodedTitle&spaceKey=$SpaceKey"
     
     $headers = @{
-        "Authorization" = "Basic $base64AuthInfo"
+        "Authorization" = "Bearer $PersonalAccessToken"
+        "Content-Type"  = "application/json"
+    }
+    
+    try {
+        $response = Invoke-RestMethod -Uri $searchUrl -Method Get -Headers $headers -ErrorAction Stop
+        if ($response.results.Count -gt 0) {
+            return $response.results[0]
+        }
+        return $null
+    }
+    catch {
+        Write-Verbose "Error searching for existing page: $($_.Exception.Message)"
+        return $null
+    }
+}
+
+# Function to delete a page from Confluence
+function Remove-ConfluencePage {
+    param([string]$PageId, [string]$BaseUrl, [string]$PersonalAccessToken)
+    
+    $deleteUrl = "$BaseUrl/rest/api/content/$PageId"
+    
+    $headers = @{
+        "Authorization" = "Bearer $PersonalAccessToken"
+        "Content-Type"  = "application/json"
+    }
+    
+    try {
+        Write-Verbose "Deleting existing page with ID: $PageId"
+        Invoke-RestMethod -Uri $deleteUrl -Method Delete -Headers $headers -ErrorAction Stop
+        Write-Host "Successfully deleted existing page." -ForegroundColor Yellow
+        return $true
+    }
+    catch {
+        $errorDetails = $_.Exception.Message
+        Write-Warning "Failed to delete existing page (ID: $PageId): $errorDetails"
+        return $false
+    }
+}
+
+# Function to post the payload to the Confluence API
+function Invoke-ConfluenceApi {
+    param([string]$Payload, [string]$BaseUrl, [string]$PersonalAccessToken)
+    $apiUrl = "$BaseUrl/rest/api/content"
+    
+    $headers = @{
+        "Authorization" = "Bearer $PersonalAccessToken"
         "Content-Type"  = "application/json"
     }
 
     try {
         Write-Verbose "Applying payload to Confluence API at $apiUrl"
-        Invoke-RestMethod -Uri $apiUrl -Method Post -Headers $headers -Body $Payload -ErrorAction Stop
+        $response = Invoke-RestMethod -Uri $apiUrl -Method Post -Headers $headers -Body $Payload -ErrorAction Stop
         Write-Host "Successfully created page in Confluence." -ForegroundColor Green
+        return $response
     }
     catch {
-        Write-Error "Failed to create Confluence page. Response: $($_.Exception.Response.Content)"
+        $errorDetails = $_.Exception.Message
+        $httpStatusCode = if ($_.Exception.Response) { $_.Exception.Response.StatusCode.value__ } else { "Unknown" }
+        $httpStatusDescription = if ($_.Exception.Response) { $_.Exception.Response.StatusDescription } else { "Unknown" }
+        
+        Write-Error "Failed to create Confluence page."
+        Write-Error "HTTP Status: $httpStatusCode ($httpStatusDescription)"
+        Write-Error "Error Details: $errorDetails"
+        
+        # Try to get the response body for more detailed error information
+        try {
+            if ($_.ErrorDetails.Message) {
+                # PowerShell 6+ provides ErrorDetails.Message with the response body
+                $errorBody = $_.ErrorDetails.Message
+                Write-Error "Response Body: $errorBody"
+            }
+            elseif ($_.Exception.Response) {
+                # For older PowerShell versions, try to read the response stream
+                $responseStream = $_.Exception.Response.GetResponseStream()
+                $reader = New-Object System.IO.StreamReader($responseStream)
+                $errorBody = $reader.ReadToEnd()
+                $reader.Close()
+                $responseStream.Close()
+                Write-Error "Response Body: $errorBody"
+            }
+            else {
+                Write-Verbose "No additional response body information available"
+            }
+        }
+        catch {
+            Write-Verbose "Could not read response body: $($_.Exception.Message)"
+        }
+        
+        return $null
     }
 }
 
+# --- HTML SANITIZATION FOR CONFLUENCE COMPATIBILITY ---
+
+# Function to sanitize HTML content for Confluence storage format compatibility
+function ConvertTo-ConfluenceStorage {
+    param([string]$HtmlContent)
+    
+    if ([string]::IsNullOrWhiteSpace($HtmlContent)) {
+        return $HtmlContent
+    }
+    
+    Write-Verbose "Sanitizing HTML content for Confluence compatibility..."
+    
+    try {
+        # Create HTML document from content
+        $htmlDoc = New-Object HtmlAgilityPack.HtmlDocument
+        $htmlDoc.LoadHtml($HtmlContent)
+        
+        # Remove dangerous/unsupported elements completely
+        $elementsToRemove = @(
+            "//script",           # JavaScript
+            "//style",            # CSS styles
+            "//form",             # Form elements
+            "//input",            # Input controls
+            "//select",           # Select dropdowns
+            "//textarea",         # Text areas
+            "//button[@onclick]", # Clickable buttons with JS
+            "//video",            # Video elements
+            "//audio",            # Audio elements
+            "//canvas",           # Canvas elements
+            "//object",           # Object/embed elements
+            "//embed",            # Embedded content
+            "//applet"            # Java applets
+        )
+        
+        foreach ($xpath in $elementsToRemove) {
+            $nodes = $htmlDoc.DocumentNode.SelectNodes($xpath)
+            if ($nodes) {
+                Write-Verbose "Removing $($nodes.Count) '$xpath' elements"
+                foreach ($node in $nodes) {
+                    $node.Remove()
+                }
+            }
+        }
+        
+        # Convert HTML5 semantic elements to div (preserve content)
+        $elementsToConvert = @{
+            "//article" = "div"
+            "//section" = "div" 
+            "//header"  = "div"
+            "//footer"  = "div"
+            "//aside"   = "div"
+            "//nav"     = "div"
+            "//main"    = "div"
+        }
+        
+        foreach ($xpath in $elementsToConvert.Keys) {
+            $nodes = $htmlDoc.DocumentNode.SelectNodes($xpath)
+            if ($nodes) {
+                Write-Verbose "Converting $($nodes.Count) '$xpath' elements to '$($elementsToConvert[$xpath])'"
+                foreach ($node in $nodes) {
+                    $node.Name = $elementsToConvert[$xpath]
+                }
+            }
+        }
+        
+        # Remove JavaScript event attributes from all elements
+        $jsAttributes = @(
+            "onclick", "ondblclick", "onmousedown", "onmouseup", "onmouseover", "onmousemove", 
+            "onmouseout", "onfocus", "onblur", "onkeypress", "onkeydown", "onkeyup", 
+            "onload", "onunload", "onchange", "onsubmit", "onreset", "onresize"
+        )
+        
+        $allElements = $htmlDoc.DocumentNode.SelectNodes("//*[@*]")
+        if ($allElements) {
+            foreach ($element in $allElements) {
+                # Remove JavaScript event attributes
+                foreach ($jsAttr in $jsAttributes) {
+                    if ($element.Attributes[$jsAttr]) {
+                        Write-Verbose "Removing '$jsAttr' attribute from '$($element.Name)' element"
+                        $element.Attributes[$jsAttr].Remove()
+                    }
+                }
+                
+                # Remove inline style attributes (CSS)
+                if ($element.Attributes["style"]) {
+                    Write-Verbose "Removing 'style' attribute from '$($element.Name)' element"
+                    $element.Attributes["style"].Remove()
+                }
+                
+                # Remove data-* attributes (custom data attributes)
+                $dataAttributes = $element.Attributes | Where-Object { $_.Name.StartsWith("data-") }
+                foreach ($dataAttr in $dataAttributes) {
+                    Write-Verbose "Removing '$($dataAttr.Name)' attribute from '$($element.Name)' element"
+                    $dataAttr.Remove()
+                }
+            }
+        }
+        
+        # Clean up empty elements that serve no purpose
+        $emptyElements = $htmlDoc.DocumentNode.SelectNodes("//span[not(@*) and not(text()) and not(*)]")
+        if ($emptyElements) {
+            Write-Verbose "Removing $($emptyElements.Count) empty span elements"
+            foreach ($emptyElement in $emptyElements) {
+                $emptyElement.Remove()
+            }
+        }
+        
+        # Fix malformed HTML entities (common issue with Oracle docs)
+        $sanitizedHtml = $htmlDoc.DocumentNode.InnerHtml
+        
+        # Fix common entity issues that cause Confluence XHTML parsing errors
+        # Handle the specific case from Oracle docs: &id=cpyr should become &amp;id=cpyr
+        $sanitizedHtml = $sanitizedHtml -replace '&id=([^"]+)"', '&amp;id=$1"'
+        
+        # More comprehensive entity fixing: & followed by non-entity characters
+        # This catches cases like &id= that aren't proper HTML entities
+        $sanitizedHtml = $sanitizedHtml -replace '&([a-zA-Z0-9]+)(?![a-zA-Z0-9]*;)(?==)', '&amp;$1'
+        
+        # Fix standalone & characters that aren't part of entities
+        # Look for & not followed by proper entity names or numeric entities
+        $sanitizedHtml = $sanitizedHtml -replace '&(?![a-zA-Z][a-zA-Z0-9]*;|#[0-9]+;|#x[0-9a-fA-F]+;)', '&amp;'
+        
+        Write-Verbose "HTML sanitization completed successfully"
+        return $sanitizedHtml
+        
+    }
+    catch {
+        Write-Warning "Failed to sanitize HTML content: $($_.Exception.Message)"
+        Write-Warning "Returning original content - this may cause Confluence import issues"
+        return $HtmlContent
+    }
+}
 
 # --- CROSS-PLATFORM SETUP ---
 
@@ -585,8 +811,8 @@ if ($Mode -eq 'Apply') {
         Write-Error "ConfluenceSpaceKey is required when Mode is 'Apply'"
         exit 1
     }
-    if (-not $Credential) {
-        Write-Error "Credential is required when Mode is 'Apply'"
+    if (-not $PersonalAccessToken) {
+        Write-Error "PersonalAccessToken is required when Mode is 'Apply'"
         exit 1
     }
     Write-Verbose "Apply mode parameters validated successfully"
@@ -621,8 +847,40 @@ foreach ($link in $allLinks) {
             Save-PayloadToFile -Payload $jsonPayload -Title $pageData.Title -Directory $OutputDirectory
         }
         elseif ($Mode -eq 'Apply') {
+            # Check if page already exists
+            $existingPage = Get-ConfluencePageByTitle -Title $pageData.Title -BaseUrl $ConfluenceBaseUrl -SpaceKey $ConfluenceSpaceKey -PersonalAccessToken $PersonalAccessToken
+            
+            if ($existingPage) {
+                if ($OverwriteExisting) {
+                    Write-Host "Page '$($pageData.Title)' already exists. Deleting and recreating..." -ForegroundColor Yellow
+                    $deleteSuccess = Remove-ConfluencePage -PageId $existingPage.id -BaseUrl $ConfluenceBaseUrl -PersonalAccessToken $PersonalAccessToken
+                    
+                    if ($deleteSuccess) {
+                        # Wait a moment for the deletion to complete
+                        Start-Sleep -Milliseconds 1000
+                        Write-Verbose "Creating new page after deletion"
+                    } else {
+                        Write-Warning "Could not delete existing page. Will attempt to create anyway."
+                    }
+                } else {
+                    Write-Host "Page '$($pageData.Title)' already exists. Skipping (use -OverwriteExisting to replace)..." -ForegroundColor Cyan
+                    continue
+                }
+            }
+            
+            # Create the page (either new or replacement)
             $jsonPayload = New-ConfluencePayload -Title $pageData.Title -HtmlContent $pageData.HtmlContent -SpaceKey $ConfluenceSpaceKey
-            Invoke-ConfluenceApi -Payload $jsonPayload -BaseUrl $ConfluenceBaseUrl -Cred $Credential
+            $result = Invoke-ConfluenceApi -Payload $jsonPayload -BaseUrl $ConfluenceBaseUrl -PersonalAccessToken $PersonalAccessToken
+            
+            # If page creation failed, try with a unique title as fallback
+            if (-not $result) {
+                $timestamp = Get-Date -Format "yyyyMMdd-HHmmss-fff"
+                $uniqueTitle = "$($pageData.Title) (retry-$timestamp)"
+                Write-Warning "Page creation failed. Retrying with unique title: $uniqueTitle"
+                
+                $jsonPayloadRetry = New-ConfluencePayload -Title $uniqueTitle -HtmlContent $pageData.HtmlContent -SpaceKey $ConfluenceSpaceKey
+                Invoke-ConfluenceApi -Payload $jsonPayloadRetry -BaseUrl $ConfluenceBaseUrl -PersonalAccessToken $PersonalAccessToken
+            }
         }
     }
 

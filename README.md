@@ -402,8 +402,10 @@ A cross-platform PowerShell script for scraping Oracle documentation and creatin
 .\scripts\Sync-ConfluenceDoc.ps1 -Mode Save -Verbose
 
 # Apply directly to Confluence
-$cred = Get-Credential
-.\scripts\Sync-ConfluenceDoc.ps1 -Mode Apply -ConfluenceBaseUrl "http://localhost:8090" -ConfluenceSpaceKey "DOCS" -Credential $cred -Verbose
+.\scripts\Sync-ConfluenceDoc.ps1 -Mode Apply -ConfluenceBaseUrl "http://localhost:8090" -ConfluenceSpaceKey "DOCS" -PersonalAccessToken "YOUR_TOKEN_HERE" -Verbose
+
+# Apply and overwrite existing pages
+.\scripts\Sync-ConfluenceDoc.ps1 -Mode Apply -ConfluenceBaseUrl "http://localhost:8090" -ConfluenceSpaceKey "DOCS" -PersonalAccessToken "YOUR_TOKEN_HERE" -OverwriteExisting -Verbose
 ```
 
 **Linux/macOS:**
@@ -415,7 +417,10 @@ pwsh scripts/Test-CrossPlatform.ps1 -Verbose
 pwsh scripts/Sync-ConfluenceDoc.ps1 -Mode Save -Verbose
 
 # Apply directly to Confluence
-pwsh scripts/Sync-ConfluenceDoc.ps1 -Mode Apply -ConfluenceBaseUrl "http://localhost:8090" -ConfluenceSpaceKey "DOCS" -Credential (Get-Credential) -Verbose
+pwsh scripts/Sync-ConfluenceDoc.ps1 -Mode Apply -ConfluenceBaseUrl "http://localhost:8090" -ConfluenceSpaceKey "DOCS" -PersonalAccessToken "YOUR_TOKEN_HERE" -Verbose
+
+# Apply and overwrite existing pages
+pwsh scripts/Sync-ConfluenceDoc.ps1 -Mode Apply -ConfluenceBaseUrl "http://localhost:8090" -ConfluenceSpaceKey "DOCS" -PersonalAccessToken "YOUR_TOKEN_HERE" -OverwriteExisting -Verbose
 ```
 
 #### Features
