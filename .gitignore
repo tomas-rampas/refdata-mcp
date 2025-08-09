@@ -371,3 +371,4 @@ appsettings.Production.json
 
 CLAUDE.*
 confluence/
+/test*/**
